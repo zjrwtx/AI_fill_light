@@ -1,0 +1,7 @@
+fastapi
+uvicorn[standard]
+pillow
+requests
+# Add your specific camel library and ollama/llava dependencies here
+# e.g., python-camel-ai (replace with actual package name if different)
+# ollama 
