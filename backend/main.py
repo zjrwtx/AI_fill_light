@@ -10,6 +10,7 @@ from camel.models import ModelFactory
 from camel.types import ModelPlatformType
 import json
 from pydantic import BaseModel
+
 app = FastAPI()
 
 # Configure CORS
@@ -29,8 +30,18 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+class LightingSettings(BaseModel):
+    brightness: int
+    color: str
+    pattern: str
+
 @app.post("/analyze-image/")
-async def analyze_image(file: UploadFile = File(...), model_type: str = Form(...), api_key: str = Form(...)):
+async def analyze_image(
+    file: UploadFile = File(...), 
+    model_type: str = Form(...), 
+    api_key: str = Form(...),
+    user_preference: str = Form(default="")
+):
     """Receives an image, analyzes it (placeholder), and returns suggested lighting settings."""
     try:
         # 使用传入的model_type和api_key初始化模型
@@ -39,27 +50,45 @@ async def analyze_image(file: UploadFile = File(...), model_type: str = Form(...
             model_type=model_type,
             api_key=api_key,
             url="https://openrouter.ai/api/v1",
-            model_config_dict={"max_tokens": 4096},
+            
         )
-        agent = ChatAgent(system_message="You are an expert photo lighting assistant. Analyze the provided image and suggest optimal lighting settings (brightness, color temperature/hex color, pattern like steady/pulse/strobe) suitable for the scene. Respond ONLY with a JSON object containing 'brightness' (0-100), 'color' (hex code), and 'pattern' ('steady', 'pulse', or 'strobe').", model=model)
+        
+        # 调整系统提示词强调氛围感
+        system_message = "你是一位专业的氛围照明顾问。分析提供的图像并建议最能营造舒适氛围的灯光设置。注重情感体验和空间氛围，选择能增强环境情绪和感觉的灯光。你必须只返回一个JSON对象，格式为：{\"brightness\": 数值(0-100), \"color\": \"十六进制颜色代码\", \"pattern\": \"steady或pulse或strobe中的一个\"}。不要添加任何解释或其他文本。"
+        
+        agent = ChatAgent(system_message=system_message, model=model)
 
         image_bytes = await file.read()
         image = Image.open(BytesIO(image_bytes))
 
-        context = "Analyze this image for optimal photography lighting settings."
+        # 基础提示词
+        context = "分析这张图片并提供最佳氛围照明设置，只返回JSON格式数据。"
+        
+        # 如果用户提供了偏好，添加到提示词中
+        if user_preference:
+            context = f"分析这张图片并提供最佳氛围照明设置，考虑以下偏好：{user_preference}。只返回JSON格式数据。"
+        
         message = BaseMessage.make_user_message(
             role_name="user", content=context, image_list=[image]
         )
-        response = agent.step(message)
-        response = response.msgs[0].content
-     
-
+        
+        # 首先不使用response_format尝试获取原始响应
+        response = agent.step(message, response_format=LightingSettings)
+        ai_response_content = response.msgs[0].content
+        
         # 添加调试日志
-        print(f"AI模型响应内容: {response}")
-
-        # 尝试解析AI模型的响应
-        suggested_settings = json.loads(response)
-        return suggested_settings
+        print(f"AI模型响应内容: {ai_response_content}")
+        
+        try:
+            # 尝试解析JSON响应
+            lighting_data = json.loads(ai_response_content)
+            return lighting_data
+            # 使用Pydantic模型验证
+            # suggested_settings = LightingSettings(**lighting_data)
+            # return suggested_settings.dict()
+        except Exception as e:
+            print(f"解析响应失败: {e}")
+            return {"error": "无法解析模型响应"}, 500
 
     except Exception as e:
         print(f"Error processing image: {e}")
