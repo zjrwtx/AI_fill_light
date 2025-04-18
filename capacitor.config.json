@@ -1,5 +1,10 @@
 {
-  "appId": "com.example.app",
-  "appName": "nextjs-capacitor-template",
-  "webDir": "out"
+  "appId": "com.aifilllight.app",
+  "appName": "AI闪亮补光",
+  "webDir": "out",
+  "plugins": {
+    "PushNotifications": {
+      "presentationOptions": ["badge", "sound", "alert"]
+    }
+  }
 }

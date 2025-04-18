@@ -1,6 +1,8 @@
 'use client';
 
 import { useState, useEffect, useRef } from 'react';
+import { Capacitor } from '@capacitor/core';
+import { PushNotifications } from '@capacitor/push-notifications';
 
 export default function Home() {
   const [selectedTemplate, setSelectedTemplate] = useState(null);
@@ -23,6 +25,8 @@ export default function Home() {
   const [modelType, setModelType] = useState('meta-llama/llama-4-scout:free');
   const [apiKey, setApiKey] = useState('');
   const [userPreference, setUserPreference] = useState('');
+  const [notificationsEnabled, setNotificationsEnabled] = useState(false);
+  const [pushToken, setPushToken] = useState('');
   const fileInputRef = useRef(null);
   const preferenceRef = useRef(null);
 
@@ -64,6 +68,89 @@ export default function Home() {
       localStorage.setItem('modelType', modelType);
     }
   }, [apiKey, modelType]);
+
+  // 初始化推送通知
+  useEffect(() => {
+    const initPushNotifications = async () => {
+      if (Capacitor.isNativePlatform()) {
+        try {
+          // 请求权限
+          const permStatus = await PushNotifications.requestPermissions();
+          
+          if (permStatus.receive === 'granted') {
+            setNotificationsEnabled(true);
+            
+            // 注册推送
+            await PushNotifications.register();
+            
+            // 添加各种监听器
+            PushNotifications.addListener('registration', (token) => {
+              setPushToken(token.value);
+              console.log('Push registration success, token: ' + token.value);
+            });
+            
+            PushNotifications.addListener('registrationError', (error) => {
+              console.error('Error on registration: ' + JSON.stringify(error));
+            });
+            
+            PushNotifications.addListener('pushNotificationReceived', (notification) => {
+              console.log('Push notification received: ' + JSON.stringify(notification));
+            });
+            
+            PushNotifications.addListener('pushNotificationActionPerformed', (action) => {
+              console.log('Push notification action performed: ' + JSON.stringify(action));
+            });
+          }
+        } catch (error) {
+          console.error('推送通知初始化失败:', error);
+        }
+      }
+    };
+    
+    initPushNotifications();
+    
+    // 清理函数
+    return () => {
+      if (Capacitor.isNativePlatform()) {
+        PushNotifications.removeAllListeners();
+      }
+    };
+  }, []);
+
+  // 发送本地测试通知
+  const sendLocalNotification = () => {
+    if (Capacitor.isNativePlatform() && notificationsEnabled) {
+      // 使用Capacitor API发送本地通知
+      PushNotifications.schedule({
+        notifications: [
+          {
+            title: '闪亮补光已准备就绪',
+            body: '点击开启完美自拍模式',
+            id: new Date().getTime(),
+            sound: true,
+            attachments: null,
+            actionTypeId: '',
+            extra: null
+          }
+        ]
+      });
+    } else {
+      // 在web环境中使用浏览器通知API
+      if (Notification.permission === 'granted') {
+        new Notification('闪亮补光已准备就绪', {
+          body: '点击开启完美自拍模式'
+        });
+      } else if (Notification.permission !== 'denied') {
+        Notification.requestPermission().then(permission => {
+          if (permission === 'granted') {
+            new Notification('闪亮补光已准备就绪', {
+              body: '点击开启完美自拍模式'
+            });
+          }
+        });
+      }
+    }
+  };
 
   // 处理脉冲效果
   useEffect(() => {
@@ -144,7 +231,7 @@ export default function Home() {
   };
   
   // 使用模板并直接进入补光模式
-  const useTemplate = (template) => {
+  const applyTemplate = (template) => {
     setCustomSettings({
       brightness: template.brightness,
       color: template.color,
@@ -154,6 +241,31 @@ export default function Home() {
     });
     // 直接进入全屏模式
     setIsFullscreen(true);
+    
+    // 发送应用模板成功通知
+    if (notificationsEnabled) {
+      setTimeout(() => {
+        if (Capacitor.isNativePlatform()) {
+          PushNotifications.schedule({
+            notifications: [
+              {
+                title: '光效已应用 ✨',
+                body: `"${template.name}" 光效已成功应用，开始拍摄吧！`,
+                id: new Date().getTime(),
+                sound: true,
+                attachments: null,
+                actionTypeId: '',
+                extra: null
+              }
+            ]
+          });
+        } else if (Notification && Notification.permission === 'granted') {
+          new Notification('光效已应用 ✨', {
+            body: `"${template.name}" 光效已成功应用，开始拍摄吧！`
+          });
+        }
+      }, 2000); // 延迟2秒发送通知
+    }
   };
 
   const handleImageUpload = async (event) => {
@@ -529,6 +641,48 @@ export default function Home() {
               </div>
             </div>
             
+            {/* 推送通知设置 */}
+            <div className="ios-card p-3 mb-4 shadow-sm rounded-2xl bg-white/80 backdrop-blur-sm">
+              <h3 className="text-sm font-medium mb-2">推送通知设置</h3>
+              <p className="text-xs text-gray-500 mb-3">开启通知，不错过每一次美颜提醒</p>
+              
+              <div className="flex items-center justify-between p-2 bg-gray-50 rounded-xl mb-3">
+                <div>
+                  <p className="text-sm font-medium">消息通知</p>
+                  <p className="text-xs text-gray-500">接收美颜提醒和新功能通知</p>
+                </div>
+                <div className="ios-switch">
+                  <input 
+                    type="checkbox" 
+                    id="notificationSwitch"
+                    checked={notificationsEnabled}
+                    onChange={() => {
+                      if (Capacitor.isNativePlatform()) {
+                        PushNotifications.requestPermissions();
+                      } else if (Notification) {
+                        Notification.requestPermission();
+                      }
+                    }}
+                    className="hidden" 
+                  />
+                  <label 
+                    htmlFor="notificationSwitch"
+                    className={`w-12 h-6 block rounded-full relative cursor-pointer transition-colors ${notificationsEnabled ? 'bg-green-400' : 'bg-gray-300'}`}
+                  >
+                    <span className={`absolute w-5 h-5 bg-white rounded-full shadow-md top-0.5 left-0.5 transition-transform ${notificationsEnabled ? 'transform translate-x-6' : ''}`}></span>
+                  </label>
+                </div>
+              </div>
+              
+              <button
+                className="ios-pill-button-sm bg-gray-100 w-full py-2 text-sm"
+                onClick={sendLocalNotification}
+                disabled={!notificationsEnabled}
+              >
+                发送测试通知
+              </button>
+            </div>
+            
             {/* 功能按钮 - 苹果风格按钮 */}
             <div className="flex flex-col gap-2 mb-4">
               <button
@@ -618,7 +772,7 @@ export default function Home() {
                       </div>
                       <div className="flex">
                         <button
-                          onClick={() => useTemplate(template)}
+                          onClick={() => applyTemplate(template)}
                           className="ios-button-sm bg-blue-500 text-white text-xs rounded-full w-7 h-7 flex items-center justify-center mr-1"
                         >
                           <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
